@@ -5,4 +5,5 @@ authors = ["Knarkzel <knarkzel@cock.li>"]
 edition = "2018"
 
 [dependencies]
-crossterm = "0.18"
+termion = "1.5.5"
+
