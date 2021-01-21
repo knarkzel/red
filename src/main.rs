@@ -86,8 +86,7 @@ impl Editor {
                         Mode::Normal => match key {
                             Key::Char('h') => self.cursor.move_left(),
                             Key::Char('j') => {
-                                self.cursor
-                                    .move_down(&self.offset, self.lines.len(), get_line!(1))
+                                self.cursor.move_down(&self.offset, self.lines.len(), get_line!(1))
                             }
                             Key::Char('k') => self.cursor.move_up(&self.offset, get_line!(-1)),
                             Key::Char('l') => self.cursor.move_right(&self.offset, get_line!(0)),
@@ -106,6 +105,17 @@ impl Editor {
                             Key::Char('I') => {
                                 switch_insert!();
                                 self.cursor.0 = 1;
+                            }
+                            Key::Char('o') => {
+                                switch_insert!();
+                                self.lines.insert(self.cursor.1 as usize + self.offset.1, String::new());
+                                self.cursor.move_down(&self.offset, self.lines.len(), get_line!(1))
+                            }
+                            Key::Char('O') => {
+                                switch_insert!();
+                                self.lines.insert(self.cursor.1 as usize + self.offset.1 - 1, String::new());
+                                // again, tiny hack
+                                self.cursor.0 = 0;
                             }
                             Key::Char('0') => self.cursor.0 = 1,
                             Key::Char('$') => {
@@ -131,7 +141,13 @@ impl Editor {
                             }
                             Key::Char(c) => {
                                 if let Some(line) = get_line_mut!(0) {
-                                    line.insert(self.cursor.0 as usize - 1, c);
+                                    if line.len() > 0 {
+                                        line.insert(self.cursor.0 as usize - 1, c);
+                                    } else {
+                                        // tiny hack
+                                        line.push(c);
+                                        self.cursor.0 += 1;
+                                    }
                                     self.cursor.0 += 1;
                                 }
                             }
