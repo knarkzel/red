@@ -1,13 +1,16 @@
-use std::fs::read_to_string;
-use std::io::Stdout;
-use std::io::{stdin, stdout, Write};
-use std::process::exit;
-use termion::event::Key;
-use termion::input::TermRead;
-use termion::raw::IntoRawMode;
-use termion::raw::RawTerminal;
-use termion::screen::*;
-use termion::terminal_size;
+use std::{
+    fs::read_to_string,
+    io::{stdin, stdout, Stdout, Write},
+};
+use termion::{
+    event::Key,
+    input::TermRead,
+    raw::{IntoRawMode, RawTerminal},
+    screen::*,
+    terminal_size,
+};
+
+mod cursor;
 
 #[derive(Debug)]
 enum Mode {
@@ -17,19 +20,19 @@ enum Mode {
 
 #[derive(Debug)]
 struct Editor {
-    current_line: usize,
-    cursor: (u16, u16),
-    lines: Vec<String>,
     mode: Mode,
+    cursor: cursor::Cursor,
+    offset: (usize, usize),
+    lines: Vec<String>,
 }
 
 impl Editor {
     fn new() -> Self {
         Self {
-            current_line: 0,
-            cursor: (1, 1),
-            lines: vec![],
             mode: Mode::Normal,
+            cursor: cursor::Cursor::new(),
+            offset: (0, 0),
+            lines: vec![],
         }
     }
     fn load_file(self) -> Self {
@@ -46,39 +49,99 @@ impl Editor {
         Self { lines, ..self }
     }
     fn run(mut self) {
+        // start
         print!("{}{}", termion::clear::All, termion::cursor::Goto(1, 1));
         let mut screen = AlternateScreen::from(stdout().into_raw_mode().unwrap());
         self.update(&mut screen);
-        loop {
+
+        // macros
+        macro_rules! get_line {
+            ($offset:expr) => {
+                self.lines
+                    .get((self.offset.1 as isize + (self.cursor.1 - 1) as isize + $offset) as usize)
+            };
+        }
+        macro_rules! get_line_mut {
+            ($offset:expr) => {
+                self.lines.get_mut(
+                    (self.offset.1 as isize + (self.cursor.1 - 1) as isize + $offset) as usize,
+                )
+            };
+        }
+        macro_rules! switch_insert {
+            () => {
+                self.mode = Mode::Insert;
+                write!(screen, "{}", termion::cursor::SteadyBar).expect("Failed to switch cursor");
+            };
+        }
+
+        'outer: loop {
             let stdin = stdin();
             for key in stdin.keys() {
                 if let Ok(key) = key {
                     if (key == Key::Ctrl('c')) | (key == Key::Ctrl('z')) {
-                        exit(0);
+                        break 'outer;
                     }
                     match self.mode {
                         Mode::Normal => match key {
-                            Key::Char('h') => self.cursor.0 -= 1,
-                            Key::Char('j') => self.cursor.1 += 1,
-                            Key::Char('k') => self.cursor.1 -= 1,
-                            Key::Char('l') => self.cursor.0 += 1,
+                            Key::Char('h') => self.cursor.move_left(),
+                            Key::Char('j') => {
+                                self.cursor
+                                    .move_down(&self.offset, self.lines.len(), get_line!(1))
+                            }
+                            Key::Char('k') => self.cursor.move_up(&self.offset, get_line!(-1)),
+                            Key::Char('l') => self.cursor.move_right(&self.offset, get_line!(0)),
                             Key::Char('i') | Key::Char('a') => {
-                                self.mode = Mode::Insert;
-                                write!(screen, "{}", termion::cursor::SteadyBar)
-                                    .expect("Failed to switch cursor");
+                                switch_insert!();
                                 if key == Key::Char('a') {
                                     self.cursor.0 += 1;
+                                }
+                            }
+                            Key::Char('A') => {
+                                switch_insert!();
+                                if let Some(line) = get_line!(0) {
+                                    self.cursor.0 = (line.len() - self.offset.0) as u16 + 1;
+                                }
+                            }
+                            Key::Char('I') => {
+                                switch_insert!();
+                                self.cursor.0 = 1;
+                            }
+                            Key::Char('0') => self.cursor.0 = 1,
+                            Key::Char('$') => {
+                                if let Some(line) = get_line!(0) {
+                                    self.cursor.0 = (line.len() - self.offset.0) as u16;
                                 }
                             }
                             _ => (),
                         },
                         Mode::Insert => match key {
-                            Key::Char(c) => println!("{}", c),
+                            Key::Left => self.cursor.move_left(),
+                            Key::Down => {
+                                self.cursor
+                                    .move_down(&self.offset, self.lines.len(), get_line!(1))
+                            }
+                            Key::Up => self.cursor.move_up(&self.offset, get_line!(-1)),
+                            Key::Right => self.cursor.move_right(&self.offset, get_line!(0)),
                             Key::Esc => {
                                 self.cursor.0 -= 1;
                                 self.mode = Mode::Normal;
                                 write!(screen, "{}", termion::cursor::SteadyBlock)
                                     .expect("Failed to switch cursor");
+                            }
+                            Key::Char(c) => {
+                                if let Some(line) = get_line_mut!(0) {
+                                    line.insert(self.cursor.0 as usize - 1, c);
+                                    self.cursor.0 += 1;
+                                }
+                            }
+                            Key::Backspace => {
+                                if let Some(line) = get_line_mut!(0) {
+                                    if line.len() > 0 {
+                                        line.remove(self.cursor.0 as usize - 2);
+                                        self.cursor.move_left();
+                                    }
+                                }
                             }
                             _ => (),
                         },
@@ -95,7 +158,7 @@ impl Editor {
         for (i, line) in self
             .lines
             .iter()
-            .skip(self.current_line)
+            .skip(self.offset.1)
             .take(height)
             .enumerate()
         {
@@ -103,7 +166,7 @@ impl Editor {
             if line.len() > width {
                 line = &line[..width];
             }
-            write!(screen, "{}{}", termion::cursor::Goto(1, i as u16), line)
+            write!(screen, "{}{}", termion::cursor::Goto(1, i as u16 + 1), line)
                 .expect("Failed to print line");
         }
 
