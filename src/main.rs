@@ -32,6 +32,7 @@ struct Editor {
     file: String,
     cursor: cursor::Cursor,
     offset: (usize, usize),
+    size: (u16, u16),
     lines: Vec<String>,
 }
 
@@ -208,8 +209,13 @@ impl Editor {
     }
     fn update(&mut self, screen: &mut AlternateScreen<RawTerminal<Stdout>>) {
         write!(screen, "{}", termion::clear::All).expect("Failed to clear screen");
-        let size = terminal_size().unwrap();
-        let (width, height) = (size.0 as usize, size.1 as usize);
+
+        // size and scrolling
+        self.size = terminal_size().unwrap();
+        self.check_scroll();
+
+        // draw screen
+        let (width, height) = (self.size.0 as usize, self.size.1 as usize);
         for (i, line) in self
             .lines
             .iter()
@@ -283,8 +289,19 @@ impl Editor {
             termion::cursor::Goto(self.cursor.0, self.cursor.1)
         )
         .expect("Failed to move cursor");
-
         screen.flush().unwrap();
+    }
+    fn check_scroll(&mut self) {
+        let height = self.size.1 - 2;
+        let increment = height / 3;
+        if self.cursor.1 < 1 {
+            self.offset.1 = self.offset.1.saturating_sub(increment as usize);
+            self.cursor.1 = increment;
+        }
+        if self.cursor.1 > height {
+            self.offset.1 += increment as usize;
+            self.cursor.1 = height - increment;
+        }
     }
 }
 
