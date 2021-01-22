@@ -3,12 +3,11 @@ use std::{
     io::{stdin, stdout, Stdout, Write},
 };
 use termion::{
-    color,
+    *,
     event::Key,
     input::TermRead,
     raw::{IntoRawMode, RawTerminal},
     screen::*,
-    terminal_size,
 };
 
 mod cursor;
@@ -51,7 +50,7 @@ impl Editor {
     }
     fn run(mut self) {
         // start
-        print!("{}{}", termion::clear::All, termion::cursor::Goto(1, 1));
+        print!("{}{}", clear::All, termion::cursor::Goto(1, 1));
         let mut screen = AlternateScreen::from(stdout().into_raw_mode().unwrap());
         self.update(&mut screen);
 
@@ -114,8 +113,7 @@ impl Editor {
                                 }
                             }
                             Key::Char('G') => {
-                                self.cursor.1 = self.lines.len() as u16;
-                                self.cursor.0 = 1;
+                                self.scroll_to(self.lines.len());
                             }
                             Key::Char('A') => {
                                 switch_insert!();
@@ -140,10 +138,19 @@ impl Editor {
                                 // again, tiny hack
                                 self.cursor.0 = 0;
                             }
-                            Key::Char('0') => self.cursor.0 = 1,
+                            Key::Char('0') => {
+                                self.offset.0 = 0;
+                                self.cursor.0 = 1;
+                            }
                             Key::Char('$') => {
                                 if let Some(line) = get_line!(0) {
-                                    self.cursor.0 = (line.len() - self.offset.0) as u16;
+                                    if line.len() > self.size.0 as usize {
+                                        self.offset.0 = line.len() - (self.size.0 / 2) as usize;
+                                        self.cursor.0 = self.size.0 / 2;
+                                    } else {
+                                        self.offset.0 = 0;
+                                        self.cursor.0 = line.len() as u16;
+                                    }
                                 }
                             }
                             _ => (),
@@ -208,7 +215,7 @@ impl Editor {
         }
     }
     fn update(&mut self, screen: &mut AlternateScreen<RawTerminal<Stdout>>) {
-        write!(screen, "{}", termion::clear::All).expect("Failed to clear screen");
+        write!(screen, "{}", clear::All).expect("Failed to clear screen");
 
         // size and scrolling
         self.size = terminal_size().unwrap();
@@ -216,19 +223,25 @@ impl Editor {
 
         // draw screen
         let (width, height) = (self.size.0 as usize, self.size.1 as usize);
-        for (i, line) in self
-            .lines
-            .iter()
-            .skip(self.offset.1)
-            .take(height.saturating_sub(2))
-            .enumerate()
-        {
-            let mut line = line.as_str();
-            if line.len() > width {
-                line = &line[..width];
+        for (i, line) in self.lines.iter().skip(self.offset.1).take(height.saturating_sub(2)).enumerate() {
+            let temp = line.as_str();
+            let slice = if temp.len() >= self.offset.0 {
+                let (bound_x1, bound_x2) = (self.offset.0, width + self.offset.0);
+                if temp.len() > bound_x2 {
+                    temp.get(self.offset.0..(width + self.offset.0))
+                } else {
+                    temp.get(self.offset.0..)
+                }
+            } else {
+                None
+            };
+            // let line = temp.get(self.offset.0..(width + self.offset.0));
+            // if line.len() > width {
+            //     line = &line[..width];
+            // }
+            if let Some(slice) = slice {
+                write!(screen, "{}{}", termion::cursor::Goto(1, i as u16 + 1), slice).expect("Failed to print line");
             }
-            write!(screen, "{}{}", termion::cursor::Goto(1, i as u16 + 1), line)
-                .expect("Failed to print line");
         }
 
         // status bar
@@ -239,13 +252,13 @@ impl Editor {
             };
             format!(
                 "{}{}{} {} {}{}{}",
-                termion::style::Bold,
+                style::Bold,
                 color::Bg(color::LightGreen),
                 color::Fg(color::Black),
                 mode,
                 color::Bg(color::Reset),
                 color::Fg(color::Reset),
-                termion::style::Reset,
+                style::Reset,
             )
         };
         let status_file = {
@@ -260,8 +273,8 @@ impl Editor {
             )
         };
         let status_position = {
-            let col = self.cursor.0;
-            let line = self.offset.1 + self.cursor.1 as usize;
+            let col = self.cursor.0 as usize + self.offset.0;
+            let line = self.cursor.1 as usize + self.offset.1;
             format!(
                 "{}{} {}:{} {}{}",
                 color::Bg(color::LightRed),
@@ -276,8 +289,11 @@ impl Editor {
         let status_bar_pos = height as u16 - 1;
         write!(
             screen,
-            "{}{}",
+            "{}{}{}{}",
             termion::cursor::Goto(1, status_bar_pos),
+            // color::Bg(color::LightBlack),
+            color::Bg(color::Rgb(0x35, 0x35, 0x35)),
+            clear::CurrentLine,
             self.status_bar
         )
         .expect("Failed to print status_bar");
@@ -292,16 +308,34 @@ impl Editor {
         screen.flush().unwrap();
     }
     fn check_scroll(&mut self) {
+        // check vertically
         let height = self.size.1 - 2;
-        let increment = height / 3;
+        let mut increment = height / 2;
         if self.cursor.1 < 1 {
             self.offset.1 = self.offset.1.saturating_sub(increment as usize);
-            self.cursor.1 = increment;
-        }
-        if self.cursor.1 > height {
+            self.cursor.1 = increment + 1;
+        } else if self.cursor.1 > height {
             self.offset.1 += increment as usize;
             self.cursor.1 = height - increment;
         }
+
+        // check horizontally 
+        let width = self.size.0;
+        increment = width / 2;
+        if self.cursor.0 <= 1 && self.offset.0 > 0 {
+            self.offset.0 = self.offset.0.saturating_sub(increment as usize);
+            self.cursor.0 = width;
+        }
+        if self.cursor.0 > self.size.0 {
+            self.offset.0 += increment as usize;
+            self.cursor.0 = width - increment;
+        }
+    }
+    fn scroll_to(&mut self, line: usize) {
+        let height = (self.size.1 - 2) as usize;
+        self.offset.1 = line.saturating_sub(height / 2);
+        self.cursor.1 = line.saturating_sub(self.offset.1) as u16;
+        self.cursor.0 = 1;
     }
 }
 
