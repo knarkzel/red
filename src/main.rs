@@ -16,6 +16,7 @@ mod cursor;
 enum Mode {
     Insert,
     Normal,
+    Command,
 }
 
 impl Default for Mode {
@@ -27,8 +28,9 @@ impl Default for Mode {
 #[derive(Debug, Default)]
 struct Editor {
     mode: Mode,
-    status_bar: String,
     file: String,
+    status_bar: String,
+    command: String,
     cursor: cursor::Cursor,
     offset: (usize, usize),
     size: (u16, u16),
@@ -163,6 +165,7 @@ impl Editor {
                                     }
                                 }
                             }
+                            Key::Char(':') => self.mode = Mode::Command,
                             _ => (),
                         },
                         Mode::Insert => match key {
@@ -218,6 +221,24 @@ impl Editor {
                             }
                             _ => (),
                         },
+                        Mode::Command => match key {
+                            Key::Esc => {
+                                self.mode = Mode::Normal;
+                                self.command = String::new();
+                            }
+                            Key::Char('\n') => {
+                                // parse then exit
+                                self.mode = Mode::Normal;
+                                self.command = String::new();
+                            }
+                            Key::Backspace => {
+                                self.command.pop();
+                            }
+                            Key::Char(c) => {
+                                self.command.push(c);
+                            }
+                            _ => (),
+                        }
                     }
                     self.update(&mut screen);
                 }
@@ -242,7 +263,7 @@ impl Editor {
         {
             let temp = line.as_str();
             let slice = if temp.len() >= self.offset.0 {
-                let (bound_x1, bound_x2) = (self.offset.0, width + self.offset.0);
+                let (_, bound_x2) = (self.offset.0, width + self.offset.0);
                 if temp.len() > bound_x2 {
                     temp.get(self.offset.0..(width + self.offset.0))
                 } else {
@@ -271,6 +292,7 @@ impl Editor {
             let mode = match self.mode {
                 Mode::Insert => "INSERT",
                 Mode::Normal => "NORMAL",
+                Mode::Command => "COMMAND",
             };
             format!(
                 "{}{}{} {} {}{}{}",
@@ -321,12 +343,22 @@ impl Editor {
         .expect("Failed to print status_bar");
 
         // move cursor to self.cursor
-        write!(
-            screen,
-            "{}",
-            termion::cursor::Goto(self.cursor.0, self.cursor.1)
-        )
-        .expect("Failed to move cursor");
+        if self.mode == Mode::Command {
+            write!(
+                screen,
+                "{}:{}",
+                termion::cursor::Goto(1, height as u16),
+                self.command,
+            ).expect("Failed to show command");
+        } else {
+            write!(
+                screen,
+                "{}",
+                termion::cursor::Goto(self.cursor.0, self.cursor.1)
+            )
+            .expect("Failed to move cursor");
+        }
+
         screen.flush().unwrap();
     }
     fn check_scroll(&mut self) {
