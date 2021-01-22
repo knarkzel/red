@@ -18,7 +18,13 @@ enum Mode {
     Normal,
 }
 
-#[derive(Debug)]
+impl Default for Mode {
+    fn default() -> Self {
+        Mode::Normal
+    }
+}
+
+#[derive(Debug, Default)]
 struct Editor {
     mode: Mode,
     cursor: cursor::Cursor,
@@ -27,26 +33,16 @@ struct Editor {
 }
 
 impl Editor {
-    fn new() -> Self {
-        Self {
-            mode: Mode::Normal,
-            cursor: cursor::Cursor::new(),
-            offset: (0, 0),
-            lines: vec![],
-        }
-    }
-    fn load_file(self) -> Self {
+    fn load_file(mut self) -> Self {
         let file = std::env::args().skip(1).next();
-        let lines = if let Some(file) = file {
-            read_to_string(file)
+        if let Some(file) = file {
+            self.lines = read_to_string(file)
                 .expect("Failed to read file")
                 .lines()
                 .map(|s| s.to_string())
-                .collect::<Vec<_>>()
-        } else {
-            vec![]
-        };
-        Self { lines, ..self }
+                .collect::<Vec<_>>();
+        }
+        self
     }
     fn run(mut self) {
         // start
@@ -86,6 +82,7 @@ impl Editor {
                     if (key == Key::Ctrl('c')) | (key == Key::Ctrl('z')) {
                         break 'outer;
                     }
+                    // GLOBAL KEYS HERE PERHAPS?
                     match self.mode {
                         Mode::Normal => match key {
                             Key::Char('h') => self.cursor.move_left(),
@@ -95,10 +92,19 @@ impl Editor {
                             }
                             Key::Char('k') => self.cursor.move_up(&self.offset, get_line!(-1)),
                             Key::Char('l') => self.cursor.move_right(&self.offset, get_line!(0)),
-                            Key::Char('i') | Key::Char('a') => {
+                            Key::Char('i') => { switch_insert!(); },
+                            Key::Char('a') => {
                                 switch_insert!();
-                                if key == Key::Char('a') {
-                                    self.cursor.0 += 1;
+                                self.cursor.0 += 1;
+                            }
+                            Key::Char('x') => {
+                                if let Some(line) = get_line_mut!(0) {
+                                    if self.cursor.0 > 0 && self.cursor.1 > 1 {
+                                        line.remove(self.cursor.0 as usize - 1);
+                                        if self.cursor.0 as usize > line.len() {
+                                            self.cursor.move_left();
+                                        }
+                                    }
                                 }
                             }
                             Key::Char('A') => {
@@ -114,8 +120,9 @@ impl Editor {
                             Key::Char('o') => {
                                 switch_insert!();
                                 self.lines.insert(current_line!() + 1, String::new());
-                                self.cursor
-                                    .move_down(&self.offset, self.lines.len(), get_line!(1))
+                                // why is it zero? idk
+                                self.cursor.0 = 0;
+                                self.cursor.1 += 1;
                             }
                             Key::Char('O') => {
                                 switch_insert!();
@@ -160,18 +167,25 @@ impl Editor {
                                 }
                             }
                             Key::Backspace => {
-                                let mut delete = false;
+                                let mut join = false;
                                 if let Some(line) = get_line_mut!(0) {
-                                    if line.len() > 0 {
+                                    if self.cursor.0 <= 1 && self.cursor.1 > 1 {
+                                        join = true;
+                                    } else if line.len() > 0 && self.cursor.0 > 1 {
                                         line.remove(self.cursor.0 as usize - 2);
                                         self.cursor.move_left();
-                                    } else {
-                                        delete = true;
                                     }
                                 }
-                                if delete {
+                                if join {
+                                    let joined_line = get_line!(0).map(|s| s.to_string());
+                                    let mut split_point = 1;
+                                    if let Some(line) = get_line_mut!(-1) {
+                                        split_point = line.len() as u16;
+                                        line.push_str(&joined_line.unwrap());
+                                    }
                                     self.lines.remove(current_line!());
-                                    self.cursor.move_up(&self.offset, get_line!(-1));
+                                    self.cursor.1 -= 1;
+                                    self.cursor.0 = split_point + 1;
                                 }
                             }
                             _ => (),
@@ -213,5 +227,5 @@ impl Editor {
 }
 
 fn main() {
-    Editor::new().load_file().run();
+    Editor::default().load_file().run();
 }
