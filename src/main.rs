@@ -3,6 +3,7 @@ use std::{
     io::{stdin, stdout, Stdout, Write},
 };
 use termion::{
+    color,
     event::Key,
     input::TermRead,
     raw::{IntoRawMode, RawTerminal},
@@ -12,7 +13,7 @@ use termion::{
 
 mod cursor;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum Mode {
     Insert,
     Normal,
@@ -28,6 +29,7 @@ impl Default for Mode {
 struct Editor {
     mode: Mode,
     status_bar: String,
+    file: String,
     cursor: cursor::Cursor,
     offset: (usize, usize),
     lines: Vec<String>,
@@ -37,6 +39,7 @@ impl Editor {
     fn load_file(mut self) -> Self {
         let file = std::env::args().skip(1).next();
         if let Some(file) = file {
+            self.file = file.clone();
             self.lines = read_to_string(file)
                 .expect("Failed to read file")
                 .lines()
@@ -87,13 +90,12 @@ impl Editor {
                     match self.mode {
                         Mode::Normal => match key {
                             Key::Char('h') => self.cursor.move_left(),
-                            Key::Char('j') => {
-                                self.cursor
-                                    .move_down(&self.offset, self.lines.len(), get_line!(1))
-                            }
+                            Key::Char('j') => self.cursor.move_down(&self.offset, self.lines.len(), get_line!(1)),
                             Key::Char('k') => self.cursor.move_up(&self.offset, get_line!(-1)),
                             Key::Char('l') => self.cursor.move_right(&self.offset, get_line!(0)),
-                            Key::Char('i') => { switch_insert!(); },
+                            Key::Char('i') => {
+                                switch_insert!();
+                            }
                             Key::Char('a') => {
                                 switch_insert!();
                                 if get_line!(0).map(|t| t.len()).unwrap_or(0) > 0 {
@@ -224,21 +226,55 @@ impl Editor {
         }
 
         // status bar
-        let col = self.cursor.0;
-        let line = self.offset.1 + self.cursor.1 as usize;
-        let mode = match self.mode {
-            Mode::Insert => "INSERT",
-            Mode::Normal => "NORMAL",
+        let status_mode = {
+            let mode = match self.mode {
+                Mode::Insert => "INSERT",
+                Mode::Normal => "NORMAL",
+            };
+            format!(
+                "{}{}{} {} {}{}{}",
+                termion::style::Bold,
+                color::Bg(color::LightGreen),
+                color::Fg(color::Black),
+                mode,
+                color::Bg(color::Reset),
+                color::Fg(color::Reset),
+                termion::style::Reset,
+            )
         };
-        // let padding = size.0;
-        self.status_bar = format!("[{}] {}:{}", mode, line, col);
-        let status_bar_pos = height as u16;
+        let status_file = {
+            let file = &self.file;
+            format!(
+                "{}{} {} {}{}",
+                color::Bg(color::LightBlue),
+                color::Fg(color::Black),
+                file,
+                color::Bg(color::Reset),
+                color::Fg(color::Reset)
+            )
+        };
+        let status_position = {
+            let col = self.cursor.0;
+            let line = self.offset.1 + self.cursor.1 as usize;
+            format!(
+                "{}{} {}:{} {}{}",
+                color::Bg(color::LightRed),
+                color::Fg(color::Black),
+                col,
+                line,
+                color::Bg(color::Reset),
+                color::Fg(color::Reset)
+            )
+        };
+        self.status_bar = format!("{}{}{}", status_mode, status_file, status_position);
+        let status_bar_pos = height as u16 - 1;
         write!(
             screen,
             "{}{}",
             termion::cursor::Goto(1, status_bar_pos),
             self.status_bar
-        ).expect("Failed to print status_bar");
+        )
+        .expect("Failed to print status_bar");
 
         // move cursor to self.cursor
         write!(
