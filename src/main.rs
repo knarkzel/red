@@ -3,11 +3,11 @@ use std::{
     io::{stdin, stdout, Stdout, Write},
 };
 use termion::{
-    *,
     event::Key,
     input::TermRead,
     raw::{IntoRawMode, RawTerminal},
     screen::*,
+    *,
 };
 
 mod cursor;
@@ -90,7 +90,10 @@ impl Editor {
                     match self.mode {
                         Mode::Normal => match key {
                             Key::Char('h') => self.cursor.move_left(),
-                            Key::Char('j') => self.cursor.move_down(&self.offset, self.lines.len(), get_line!(1)),
+                            Key::Char('j') => {
+                                self.cursor
+                                    .move_down(&self.offset, self.lines.len(), get_line!(1))
+                            }
                             Key::Char('k') => self.cursor.move_up(&self.offset, get_line!(-1)),
                             Key::Char('l') => self.cursor.move_right(&self.offset, get_line!(0)),
                             Key::Char('i') => {
@@ -118,11 +121,18 @@ impl Editor {
                             Key::Char('A') => {
                                 switch_insert!();
                                 if let Some(line) = get_line!(0) {
-                                    self.cursor.0 = (line.len() - self.offset.0) as u16 + 1;
+                                    if line.len() > self.size.0 as usize {
+                                        self.offset.0 = line.len() - self.size.0 as usize;
+                                        self.cursor.0 = self.size.0 + 1;
+                                    } else {
+                                        self.offset.0 = 0;
+                                        self.cursor.0 = line.len() as u16;
+                                    }
                                 }
                             }
                             Key::Char('I') => {
                                 switch_insert!();
+                                self.offset.0 = 0;
                                 self.cursor.0 = 1;
                             }
                             Key::Char('o') => {
@@ -145,8 +155,8 @@ impl Editor {
                             Key::Char('$') => {
                                 if let Some(line) = get_line!(0) {
                                     if line.len() > self.size.0 as usize {
-                                        self.offset.0 = line.len() - (self.size.0 / 2) as usize;
-                                        self.cursor.0 = self.size.0 / 2;
+                                        self.offset.0 = line.len() - self.size.0 as usize;
+                                        self.cursor.0 = self.size.0;
                                     } else {
                                         self.offset.0 = 0;
                                         self.cursor.0 = line.len() as u16;
@@ -174,7 +184,7 @@ impl Editor {
                             Key::Char(c) => {
                                 if let Some(line) = get_line_mut!(0) {
                                     if line.len() > 0 {
-                                        line.insert(self.cursor.0 as usize - 1, c);
+                                        line.insert(self.offset.0 + self.cursor.0 as usize - 1, c);
                                     } else {
                                         line.push(c);
                                         if self.cursor.0 == 0 {
@@ -190,7 +200,7 @@ impl Editor {
                                     if self.cursor.0 <= 1 && self.cursor.1 > 1 {
                                         join = true;
                                     } else if line.len() > 0 && self.cursor.0 > 1 {
-                                        line.remove(self.cursor.0 as usize - 2);
+                                        line.remove(self.offset.0 + self.cursor.0 as usize - 2);
                                         self.cursor.move_left();
                                     }
                                 }
@@ -223,7 +233,13 @@ impl Editor {
 
         // draw screen
         let (width, height) = (self.size.0 as usize, self.size.1 as usize);
-        for (i, line) in self.lines.iter().skip(self.offset.1).take(height.saturating_sub(2)).enumerate() {
+        for (i, line) in self
+            .lines
+            .iter()
+            .skip(self.offset.1)
+            .take(height.saturating_sub(2))
+            .enumerate()
+        {
             let temp = line.as_str();
             let slice = if temp.len() >= self.offset.0 {
                 let (bound_x1, bound_x2) = (self.offset.0, width + self.offset.0);
@@ -240,7 +256,13 @@ impl Editor {
             //     line = &line[..width];
             // }
             if let Some(slice) = slice {
-                write!(screen, "{}{}", termion::cursor::Goto(1, i as u16 + 1), slice).expect("Failed to print line");
+                write!(
+                    screen,
+                    "{}{}",
+                    termion::cursor::Goto(1, i as u16 + 1),
+                    slice
+                )
+                .expect("Failed to print line");
             }
         }
 
@@ -310,7 +332,7 @@ impl Editor {
     fn check_scroll(&mut self) {
         // check vertically
         let height = self.size.1 - 2;
-        let mut increment = height / 2;
+        let increment = height / 2;
         if self.cursor.1 < 1 {
             self.offset.1 = self.offset.1.saturating_sub(increment as usize);
             self.cursor.1 = increment + 1;
@@ -319,16 +341,15 @@ impl Editor {
             self.cursor.1 = height - increment;
         }
 
-        // check horizontally 
+        // check horizontally
         let width = self.size.0;
-        increment = width / 2;
         if self.cursor.0 <= 1 && self.offset.0 > 0 {
             self.offset.0 = self.offset.0.saturating_sub(increment as usize);
             self.cursor.0 = width;
         }
         if self.cursor.0 > self.size.0 {
-            self.offset.0 += increment as usize;
-            self.cursor.0 = width - increment;
+            self.offset.0 += 1;
+            self.cursor.0 -= 1;
         }
     }
     fn scroll_to(&mut self, line: usize) {
