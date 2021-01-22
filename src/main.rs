@@ -27,6 +27,7 @@ impl Default for Mode {
 #[derive(Debug, Default)]
 struct Editor {
     mode: Mode,
+    status_bar: String,
     cursor: cursor::Cursor,
     offset: (usize, usize),
     lines: Vec<String>,
@@ -101,7 +102,7 @@ impl Editor {
                             }
                             Key::Char('x') => {
                                 if let Some(line) = get_line_mut!(0) {
-                                    if self.cursor.0 > 0 && self.cursor.1 > 1 {
+                                    if !line.is_empty() && self.cursor.1 > 1 {
                                         line.remove(self.cursor.0 as usize - 1);
                                         if self.cursor.0 as usize > line.len() {
                                             self.cursor.move_left();
@@ -211,7 +212,7 @@ impl Editor {
             .lines
             .iter()
             .skip(self.offset.1)
-            .take(height)
+            .take(height.saturating_sub(2))
             .enumerate()
         {
             let mut line = line.as_str();
@@ -222,6 +223,24 @@ impl Editor {
                 .expect("Failed to print line");
         }
 
+        // status bar
+        let col = self.cursor.0;
+        let line = self.offset.1 + self.cursor.1 as usize;
+        let mode = match self.mode {
+            Mode::Insert => "INSERT",
+            Mode::Normal => "NORMAL",
+        };
+        // let padding = size.0;
+        self.status_bar = format!("[{}] {}:{}", mode, line, col);
+        let status_bar_pos = height as u16;
+        write!(
+            screen,
+            "{}{}",
+            termion::cursor::Goto(1, status_bar_pos),
+            self.status_bar
+        ).expect("Failed to print status_bar");
+
+        // move cursor to self.cursor
         write!(
             screen,
             "{}",
