@@ -95,7 +95,9 @@ impl Editor {
                             Key::Char('i') => { switch_insert!(); },
                             Key::Char('a') => {
                                 switch_insert!();
-                                self.cursor.0 += 1;
+                                if get_line!(0).map(|t| t.len()).unwrap_or(0) > 0 {
+                                    self.cursor.0 += 1;
+                                }
                             }
                             Key::Char('x') => {
                                 if let Some(line) = get_line_mut!(0) {
@@ -106,6 +108,10 @@ impl Editor {
                                         }
                                     }
                                 }
+                            }
+                            Key::Char('G') => {
+                                self.cursor.1 = self.lines.len() as u16;
+                                self.cursor.0 = 1;
                             }
                             Key::Char('A') => {
                                 switch_insert!();
@@ -159,9 +165,10 @@ impl Editor {
                                     if line.len() > 0 {
                                         line.insert(self.cursor.0 as usize - 1, c);
                                     } else {
-                                        // tiny hack
                                         line.push(c);
-                                        self.cursor.0 += 1;
+                                        if self.cursor.0 == 0 {
+                                            self.cursor.0 += 1;
+                                        }
                                     }
                                     self.cursor.0 += 1;
                                 }
