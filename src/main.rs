@@ -1,46 +1,12 @@
-use std::{
-    fs::read_to_string,
-    io::{stdin, stdout, Stdout, Write},
-};
-use termion::{
-    event::Key,
-    input::TermRead,
-    raw::{IntoRawMode, RawTerminal},
-    screen::*,
-    *,
-};
+// mods
+pub mod cursor;
+pub mod mode;
+pub mod screen;
 
-mod cursor;
+use std::{fs::read_to_string, io::stdin};
+use termion::{clear, color, event::Key, input::TermRead, style, terminal_size};
 
-#[derive(Debug, PartialEq)]
-enum Mode {
-    Insert,
-    Normal,
-    Command,
-}
-
-impl Default for Mode {
-    fn default() -> Self {
-        Mode::Normal
-    }
-}
-
-struct TerminalScreen(pub AlternateScreen<RawTerminal<Stdout>>);
-
-impl TerminalScreen {
-    fn write<T: std::fmt::Display>(&mut self, argument: T) {
-        write!(self.0, "{}", argument).expect("Failed writing to screen");
-    }
-    fn flush(&mut self) {
-        self.0.flush().unwrap();
-    }
-}
-
-impl Default for TerminalScreen {
-    fn default() -> Self {
-        Self(AlternateScreen::from(stdout().into_raw_mode().unwrap()))
-    }
-}
+use mode::*;
 
 #[derive(Default)]
 struct Editor {
@@ -48,11 +14,11 @@ struct Editor {
     file: String,
     status_bar: String,
     command: String,
-    cursor: cursor::Cursor,
     offset: (usize, usize),
     size: (u16, u16),
     lines: Vec<String>,
-    screen: TerminalScreen,
+    cursor: cursor::Cursor,
+    screen: screen::TerminalScreen,
 }
 
 impl Editor {
@@ -119,10 +85,18 @@ impl Editor {
                         Mode::Normal => match key {
                             Key::Char('h') => self.cursor.move_left(&self.offset),
                             Key::Char('j') => {
-                                self.cursor.move_down(&self.offset, self.lines.len(), self.get_line_len(1));
+                                self.cursor.move_down(
+                                    &self.offset,
+                                    self.lines.len(),
+                                    self.get_line_len(1),
+                                );
                             }
-                            Key::Char('k') => self.cursor.move_up(&self.offset, self.get_line_len(-1)),
-                            Key::Char('l') => self.cursor.move_right(&self.offset, self.get_line_len(0)),
+                            Key::Char('k') => {
+                                self.cursor.move_up(&self.offset, self.get_line_len(-1))
+                            }
+                            Key::Char('l') => {
+                                self.cursor.move_right(&self.offset, self.get_line_len(0))
+                            }
                             Key::Char('i') => self.switch_mode(Mode::Insert),
                             Key::Char('a') => {
                                 self.switch_mode(Mode::Insert);
@@ -194,9 +168,15 @@ impl Editor {
                         },
                         Mode::Insert => match key {
                             Key::Left => self.cursor.move_left(&self.offset),
-                            Key::Down => self.cursor.move_down(&self.offset, self.lines.len(), self.get_line_len(1)),
+                            Key::Down => self.cursor.move_down(
+                                &self.offset,
+                                self.lines.len(),
+                                self.get_line_len(1),
+                            ),
                             Key::Up => self.cursor.move_up(&self.offset, self.get_line_len(-1)),
-                            Key::Right => self.cursor.move_right(&self.offset, self.get_line_len(0)),
+                            Key::Right => {
+                                self.cursor.move_right(&self.offset, self.get_line_len(0))
+                            }
                             Key::Esc => {
                                 if self.cursor.0 > 1 {
                                     self.cursor.0 -= 1;
@@ -207,7 +187,8 @@ impl Editor {
                                 let len = self.get_line_len(0);
                                 let current_line = self.current_line();
                                 if len > 0 {
-                                    self.lines[current_line].insert(self.offset.0 + self.cursor.0 as usize - 1, c);
+                                    self.lines[current_line]
+                                        .insert(self.offset.0 + self.cursor.0 as usize - 1, c);
                                 } else {
                                     self.lines[current_line].push(c);
                                     if self.cursor.0 == 0 {
@@ -223,7 +204,8 @@ impl Editor {
                                 if self.cursor.0 <= 1 && self.cursor.1 > 1 {
                                     join = true;
                                 } else if len > 0 && self.cursor.0 > 1 {
-                                    self.lines[current_line].remove(self.offset.0 + self.cursor.0 as usize - 2);
+                                    self.lines[current_line]
+                                        .remove(self.offset.0 + self.cursor.0 as usize - 2);
                                     self.cursor.move_left(&self.offset);
                                 }
                                 if join {
@@ -292,7 +274,11 @@ impl Editor {
                 None
             };
             if let Some(slice) = slice {
-                self.screen.write(format!("{}{}", termion::cursor::Goto(1, i as u16 + 1), slice));
+                self.screen.write(format!(
+                    "{}{}",
+                    termion::cursor::Goto(1, i as u16 + 1),
+                    slice
+                ));
             }
         }
 
@@ -350,9 +336,16 @@ impl Editor {
 
         // move cursor to self.cursor
         if self.mode == Mode::Command {
-            self.screen.write(format!("{}:{}", termion::cursor::Goto(1, height as u16), self.command));
+            self.screen.write(format!(
+                "{}:{}",
+                termion::cursor::Goto(1, height as u16),
+                self.command
+            ));
         } else {
-            self.screen.write(format!("{}", termion::cursor::Goto(self.cursor.0, self.cursor.1)))
+            self.screen.write(format!(
+                "{}",
+                termion::cursor::Goto(self.cursor.0, self.cursor.1)
+            ))
         }
         self.screen.flush();
     }
