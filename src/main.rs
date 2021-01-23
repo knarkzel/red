@@ -3,7 +3,7 @@ pub mod cursor;
 pub mod mode;
 pub mod screen;
 
-use std::{fs::read_to_string, io::stdin};
+use std::{fs::{read_to_string, File}, io::{self, stdin, prelude::*}};
 use termion::{clear, color, cursor::Goto, event::Key, input::TermRead, style, terminal_size};
 
 use mode::*;
@@ -68,6 +68,14 @@ impl Editor {
                 .write(format!("{}", termion::cursor::SteadyBlock)),
             _ => (),
         }
+    }
+    fn save(&self) -> io::Result<()> {
+        let mut file = File::create(&self.file)?;
+        for line in self.lines.iter() {
+            file.write(line.as_bytes())?;
+            file.write(&['\n' as u8])?;
+        }
+        Ok(())
     }
     fn run(mut self) {
         // start
@@ -230,6 +238,25 @@ impl Editor {
                             }
                             Key::Char('\n') => {
                                 // parse then exit
+                                let args = self.command.split(" ").collect::<Vec<_>>();
+                                if let Some(command) = args.get(0) {
+                                    match *command {
+                                        "w" | "write" => {
+                                            self.screen.echo("Writing to file...");
+                                            if let Err(e) = self.save() {
+                                                self.screen.echo(format!("{}", e));
+                                            }
+                                        }
+                                        "wq" => {
+                                            self.screen.echo("Writing to file...");
+                                            if let Err(e) = self.save() {
+                                                self.screen.echo(format!("{}", e));
+                                            }
+                                            break 'outer;
+                                        }
+                                        _ => (),
+                                    }
+                                }
                                 self.mode = Mode::Normal;
                                 self.command = String::new();
                             }
