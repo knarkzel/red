@@ -11,15 +11,17 @@ use termion::{clear, color, cursor::Goto, event::Key, input::TermRead, style, te
 
 use mode::*;
 
+const NUMBERS_PADDING: usize = 4;
+
 #[derive(Default)]
 struct Editor {
-    mode: Mode,
+    lines: Vec<String>,
     file: String,
     status_bar: String,
     command: String,
     offset: (usize, usize),
     size: (u16, u16),
-    lines: Vec<String>,
+    mode: mode::Mode,
     cursor: cursor::Cursor,
     screen: screen::TerminalScreen,
 }
@@ -179,6 +181,22 @@ impl Editor {
                             _ => (),
                         },
                         Mode::Insert => match key {
+                            Key::Char('\t') => {
+                                let len = self.get_line_len(0);
+                                let current_line = self.current_line();
+                                if len > 0 {
+                                    self.lines[current_line].insert_str(
+                                        self.offset.0 + self.cursor.0 as usize - 1,
+                                        "    ",
+                                    );
+                                } else {
+                                    self.lines[current_line].push_str("    ");
+                                    if self.cursor.0 == 0 {
+                                        self.cursor.0 += 1;
+                                    }
+                                }
+                                self.cursor.0 += 4;
+                            }
                             Key::Left => self.cursor.move_left(&self.offset),
                             Key::Down => self.cursor.move_down(
                                 &self.offset,
@@ -194,20 +212,6 @@ impl Editor {
                                     self.cursor.0 -= 1;
                                 }
                                 self.switch_mode(Mode::Normal);
-                            }
-                            Key::Char(c) => {
-                                let len = self.get_line_len(0);
-                                let current_line = self.current_line();
-                                if len > 0 {
-                                    self.lines[current_line]
-                                        .insert(self.offset.0 + self.cursor.0 as usize - 1, c);
-                                } else {
-                                    self.lines[current_line].push(c);
-                                    if self.cursor.0 == 0 {
-                                        self.cursor.0 += 1;
-                                    }
-                                }
-                                self.cursor.0 += 1;
                             }
                             Key::Backspace => {
                                 let mut join = false;
@@ -232,6 +236,20 @@ impl Editor {
                                     self.cursor.0 = split_point + 1;
                                 }
                             }
+                            Key::Char(c) => {
+                                let len = self.get_line_len(0);
+                                let current_line = self.current_line();
+                                if len > 0 {
+                                    self.lines[current_line]
+                                        .insert(self.offset.0 + self.cursor.0 as usize - 1, c);
+                                } else {
+                                    self.lines[current_line].push(c);
+                                    if self.cursor.0 == 0 {
+                                        self.cursor.0 += 1;
+                                    }
+                                }
+                                self.cursor.0 += 1;
+                            }
                             _ => (),
                         },
                         Mode::Command => match key {
@@ -244,19 +262,18 @@ impl Editor {
                                 let args = self.command.split(" ").collect::<Vec<_>>();
                                 if let Some(command) = args.get(0) {
                                     match *command {
-                                        "w" | "write" => {
-                                            self.screen.echo("Writing to file...");
+                                        "w" | "wq" | "write" => {
                                             if let Err(e) = self.save() {
                                                 self.screen.echo(format!("{}", e));
+                                            } else {
+                                                self.screen
+                                                    .echo(format!("\"{}\" written", self.file));
+                                            }
+                                            if command == &"wq" {
+                                                break 'outer;
                                             }
                                         }
-                                        "wq" => {
-                                            self.screen.echo("Writing to file...");
-                                            if let Err(e) = self.save() {
-                                                self.screen.echo(format!("{}", e));
-                                            }
-                                            break 'outer;
-                                        }
+                                        "q" | "quit" => break 'outer,
                                         _ => (),
                                     }
                                 }
@@ -279,10 +296,11 @@ impl Editor {
     }
     fn update(&mut self) {
         // size and scrolling
-        self.size = terminal_size().unwrap();
+        let t_size = terminal_size().unwrap();
+        self.size = (t_size.0 - (NUMBERS_PADDING as u16 + 1), t_size.1);
         self.check_scroll();
 
-        // draw self.screen.0
+        // draw contents to screen
         let (width, height) = (self.size.0 as usize, self.size.1 as usize);
         for (i, line) in self
             .lines
@@ -292,19 +310,38 @@ impl Editor {
             .enumerate()
         {
             let temp = line.as_str();
-            let slice = if temp.len() >= self.offset.0 {
-                let (_, bound_x2) = (self.offset.0, width + self.offset.0);
+            let slice = if temp.len() + NUMBERS_PADDING >= self.offset.0 {
+                let bound_x2 = width + self.offset.0;
                 if temp.len() > bound_x2 {
-                    temp.get(self.offset.0..(width + self.offset.0))
+                    temp.get(self.offset.0..bound_x2)
                 } else {
                     temp.get(self.offset.0..)
                 }
             } else {
                 None
             };
+            // show relative numbers
+            let relative_number = (i as isize - self.cursor.1 as isize + 1).abs();
+            self.screen.write(format!(
+                "{}{}{:>4}{}{}",
+                Goto(1, i as u16 + 1),
+                color::Fg(color::LightBlack),
+                relative_number,
+                color::Fg(color::Reset),
+                termion::cursor::Right(1)
+            ));
+            if i + 1 == self.cursor.1 as usize {
+                self.screen.write(format!(
+                    "{}{}",
+                    color::Bg(color::Rgb(0x30, 0x30, 0x30)),
+                    clear::CurrentLine
+                ));
+            }
+
+            // then draw text to screen
             if let Some(slice) = slice {
                 self.screen
-                    .write(format!("{}{}", Goto(1, i as u16 + 1), slice));
+                    .write(format!("{}{}", slice, color::Bg(color::Reset)));
             }
         }
 
@@ -365,8 +402,10 @@ impl Editor {
             self.screen
                 .write(format!("{}:{}", Goto(1, height as u16), self.command));
         } else {
-            self.screen
-                .write(format!("{}", Goto(self.cursor.0, self.cursor.1)))
+            self.screen.write(format!(
+                "{}",
+                Goto(self.cursor.0 + NUMBERS_PADDING as u16 + 1, self.cursor.1)
+            ))
         }
         self.screen.flush();
     }
