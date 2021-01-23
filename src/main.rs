@@ -4,7 +4,7 @@ pub mod mode;
 pub mod screen;
 
 use std::{fs::read_to_string, io::stdin};
-use termion::{clear, color, event::Key, input::TermRead, style, terminal_size};
+use termion::{clear, color, cursor::Goto, event::Key, input::TermRead, style, terminal_size};
 
 use mode::*;
 
@@ -23,7 +23,7 @@ struct Editor {
 
 impl Editor {
     fn new() -> Self {
-        print!("{}{}", clear::All, termion::cursor::Goto(1, 1));
+        print!("{}{}", clear::All, Goto(1, 1));
         Self {
             lines: vec![String::new()],
             ..Self::default()
@@ -77,6 +77,7 @@ impl Editor {
             let stdin = stdin();
             for key in stdin.keys() {
                 if let Ok(key) = key {
+                    self.screen.write(format!("{}", clear::All));
                     if (key == Key::Ctrl('c')) | (key == Key::Ctrl('z')) {
                         break 'outer;
                     }
@@ -247,8 +248,6 @@ impl Editor {
         }
     }
     fn update(&mut self) {
-        self.screen.write(format!("{}", clear::All));
-
         // size and scrolling
         self.size = terminal_size().unwrap();
         self.check_scroll();
@@ -274,11 +273,8 @@ impl Editor {
                 None
             };
             if let Some(slice) = slice {
-                self.screen.write(format!(
-                    "{}{}",
-                    termion::cursor::Goto(1, i as u16 + 1),
-                    slice
-                ));
+                self.screen
+                    .write(format!("{}{}", Goto(1, i as u16 + 1), slice));
             }
         }
 
@@ -328,7 +324,7 @@ impl Editor {
         let status_bar_pos = height as u16 - 1;
         self.screen.write(format!(
             "{}{}{}{}",
-            termion::cursor::Goto(1, status_bar_pos),
+            Goto(1, status_bar_pos),
             color::Bg(color::Rgb(0x35, 0x35, 0x35)),
             clear::CurrentLine,
             self.status_bar
@@ -336,16 +332,11 @@ impl Editor {
 
         // move cursor to self.cursor
         if self.mode == Mode::Command {
-            self.screen.write(format!(
-                "{}:{}",
-                termion::cursor::Goto(1, height as u16),
-                self.command
-            ));
+            self.screen
+                .write(format!("{}:{}", Goto(1, height as u16), self.command));
         } else {
-            self.screen.write(format!(
-                "{}",
-                termion::cursor::Goto(self.cursor.0, self.cursor.1)
-            ))
+            self.screen
+                .write(format!("{}", Goto(self.cursor.0, self.cursor.1)))
         }
         self.screen.flush();
     }
@@ -362,8 +353,7 @@ impl Editor {
         }
 
         // check horizontally
-        // let width = self.size.0;
-        if self.cursor.0 <= 1 && self.offset.0 > 0 {
+        if self.cursor.0 < 1 && self.offset.0 > 0 {
             self.offset.0 = self.offset.0.saturating_sub(1);
             self.cursor.0 += 1;
         }
