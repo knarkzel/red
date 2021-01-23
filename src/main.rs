@@ -3,7 +3,10 @@ pub mod cursor;
 pub mod mode;
 pub mod screen;
 
-use std::{fs::{read_to_string, File}, io::{self, stdin, prelude::*}};
+use std::{
+    fs::{read_to_string, File},
+    io::{self, prelude::*, stdin},
+};
 use termion::{clear, color, cursor::Goto, event::Key, input::TermRead, style, terminal_size};
 
 use mode::*;
