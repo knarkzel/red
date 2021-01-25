@@ -154,14 +154,14 @@ impl Editor {
                                 self.switch_mode(Mode::Insert);
                                 self.lines.insert(self.current_line() + 1, String::new());
                                 // why is it zero? idk
-                                self.cursor.0 = 0;
+                                self.cursor.0 = 1;
                                 self.cursor.1 += 1;
                             }
                             Key::Char('O') => {
                                 self.switch_mode(Mode::Insert);
                                 self.lines.insert(self.current_line(), String::new());
                                 // again, tiny hack
-                                self.cursor.0 = 0;
+                                self.cursor.0 = 1;
                             }
                             Key::Char('0') => {
                                 self.offset.0 = 0;
@@ -196,6 +196,18 @@ impl Editor {
                                     }
                                 }
                                 self.cursor.0 += 4;
+                            }
+                            Key::Char('\n') => {
+                                let len = self.get_line_len(0);
+                                let current_line = self.current_line();
+                                let newline = if len > 0 {
+                                    self.lines[current_line].split_off(self.cursor.0 as usize - 1)
+                                } else {
+                                    String::new()
+                                };
+                                self.lines.insert(current_line + 1, newline);
+                                self.cursor.0 = 1;
+                                self.cursor.1 += 1;
                             }
                             Key::Left => self.cursor.move_left(&self.offset),
                             Key::Down => self.cursor.move_down(
