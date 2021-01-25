@@ -498,12 +498,18 @@ impl Editor {
             'd' => match key {
                 Key::Char('d') => {
                     self.lines.remove(self.current_line());
+                    let current_line = self.current_line();
+                    let len = self.lines[current_line].len() as u16;
+                    if len == 0 {
+                        self.cursor.0 = 1;
+                    } else if self.cursor.0 > len {
+                        self.cursor.0 = len;
+                    }
                 }
                 _ => (),
             },
             _ => (),
         }
         self.mode = Mode::Normal;
-
     }
 }
