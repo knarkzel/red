@@ -111,6 +111,7 @@ impl Editor {
                             Key::Char('l') => {
                                 self.cursor.move_right(&self.offset, self.get_line_len(0))
                             }
+                            Key::Char('d') => self.mode = Mode::Spatial('d'),
                             Key::Char('i') => self.switch_mode(Mode::Insert),
                             Key::Char('a') => {
                                 self.switch_mode(Mode::Insert);
@@ -178,6 +179,22 @@ impl Editor {
                                 }
                             }
                             Key::Char(':') => self.mode = Mode::Command,
+                            Key::Ctrl('u') => {
+                                let delta = self.size.1 as usize / 2;
+                                if self.offset.1 == 0 {
+                                    self.cursor.1 = self.cursor.1.saturating_sub(delta as u16) + 1;
+                                }
+                                self.offset.1 = self.offset.1.saturating_sub(delta);
+                            }
+                            Key::Ctrl('d') => {
+                                let delta = self.size.1 as usize / 2;
+                                let temp = self.offset.1 + self.cursor.1 as usize;
+                                if temp + (self.size.1 as usize) < self.lines.len() {
+                                    self.offset.1 += delta;
+                                } else {
+                                    self.offset.1 += self.lines.len().saturating_sub(temp);
+                                }
+                            }
                             _ => (),
                         },
                         Mode::Insert => match key {
@@ -300,6 +317,20 @@ impl Editor {
                             }
                             _ => (),
                         },
+                        Mode::Spatial(c) => {
+                            match c {
+                                'd' => {
+                                    match key {
+                                        Key::Char('d') => {
+                                            self.lines.remove(self.current_line());
+                                        }
+                                        _ => (),
+                                    }
+                                }
+                                _ => (),
+                            }
+                            self.mode = Mode::Normal;
+                        }
                     }
                     self.update();
                 }
@@ -363,6 +394,7 @@ impl Editor {
                 Mode::Insert => "INSERT",
                 Mode::Normal => "NORMAL",
                 Mode::Command => "COMMAND",
+                Mode::Spatial(_) => "SPATIAL",
             };
             format!(
                 "{}{}{} {} {}{}{}",

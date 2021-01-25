@@ -3,6 +3,7 @@ pub enum Mode {
     Insert,
     Normal,
     Command,
+    Spatial(char),
 }
 
 impl Default for Mode {
