@@ -1,5 +1,5 @@
 // mods
-pub mod cursor;
+pub mod marker;
 pub mod mode;
 pub mod screen;
 
@@ -24,10 +24,10 @@ struct Editor {
     file: String,
     status_bar: String,
     command: String,
-    offset: (usize, usize),
-    size: (u16, u16),
+    size: (usize, usize),
     mode: mode::Mode,
-    cursor: cursor::Cursor,
+    offset: marker::Marker,
+    cursor: marker::Marker,
     screen: screen::TerminalScreen,
 }
 
@@ -52,7 +52,7 @@ impl Editor {
         self
     }
     fn current_line(&self) -> usize {
-        self.offset.1 + (self.cursor.1 - 1) as usize
+        self.cursor.1 + self.offset.1
     }
     fn get_line(&self, offset: isize) -> Option<&String> {
         self.lines
@@ -76,6 +76,9 @@ impl Editor {
             Mode::Normal => self
                 .screen
                 .write(format!("{}", termion::cursor::SteadyBlock)),
+            Mode::Spatial(_) => self
+                .screen
+                .write(format!("{}", termion::cursor::SteadyUnderline)),
             _ => (),
         }
     }
@@ -87,33 +90,27 @@ impl Editor {
         }
         Ok(())
     }
-    fn check_scroll(&mut self) {
-        // check vertically
-        let height = self.size.1 - 2;
-        let increment = height / 2;
-        if self.cursor.1 < 1 {
-            self.offset.1 = self.offset.1.saturating_sub(increment as usize);
-            self.cursor.1 = increment + 1;
-        } else if self.cursor.1 > height {
-            self.offset.1 += increment as usize;
-            self.cursor.1 = height - increment;
+    fn align_scroll(&mut self) {
+        // check vertically VVV
+        if self.cursor.1 > self.size.1.saturating_sub(3) {
+            self.offset.increase_y(1);
+            self.cursor.decrease_y(1);
+        } else if self.cursor.1 == 0 && self.offset.1 > 0 {
+            self.offset.decrease_y(1);
         }
 
-        // check horizontally
-        if self.cursor.0 < 1 && self.offset.0 > 0 {
-            self.offset.0 = self.offset.0.saturating_sub(1);
-            self.cursor.0 += 1;
-        }
-        if self.cursor.0 > self.size.0 {
-            self.offset.0 += 1;
-            self.cursor.0 -= 1;
+        // check horizontally >>>
+        if self.cursor.0 > self.size.0.saturating_sub(1) {
+            self.offset.increase_x(1);
+            self.cursor.decrease_x(1);
+        } else if self.cursor.0 == 0 && self.offset.0 > 0 {
+            self.offset.decrease_x(1);
         }
     }
     fn scroll_to(&mut self, line: usize) {
-        let height = (self.size.1 - 2) as usize;
-        self.offset.1 = line.saturating_sub(height / 2);
-        self.cursor.1 = line.saturating_sub(self.offset.1) as u16;
-        self.cursor.0 = 1;
+        self.offset.1 = line.saturating_sub(10);
+        self.cursor.1 = line.saturating_sub(self.offset.1 + 1);
+        self.cursor.0 = 0;
     }
     fn delete_end(&mut self) {
         let current_line = self.current_line();
@@ -121,26 +118,54 @@ impl Editor {
     }
     fn reset_x(&mut self) {
         self.offset.0 = 0;
-        self.cursor.0 = 1;
+        self.cursor.0 = 0;
     }
     fn update(&mut self) {
-        // size and scrolling
-        let t_size = terminal_size().unwrap();
-        self.size = (t_size.0 - (NUMBERS_PADDING as u16 + 1), t_size.1);
-        self.check_scroll();
+        // size
+        let term_size = terminal_size().unwrap();
+        self.size = (term_size.0 as usize - NUMBERS_PADDING, term_size.1 as usize);
 
+        // cursor bounds
+        let mut len = (self.get_line_len(0), self.lines.len());
+        if self.mode == Mode::Insert {
+            len.0 += 1;
+        }
+        self.cursor.align_bounds(&self.offset, len);
+
+        // scroll bounds
+        self.align_scroll();
+
+        // other draw
+        self.draw_screen();
+        self.render_status();
+
+        // move cursor to self.cursor
+        if self.mode == Mode::Command {
+            self.screen
+                .write(format!("{}:{}", Goto(1, self.size.1 as u16), self.command));
+        } else {
+            self.screen.write(format!(
+                "{}",
+                Goto(
+                    2 + (self.cursor.0 + NUMBERS_PADDING) as u16,
+                    1 + self.cursor.1 as u16
+                )
+            ))
+        }
+        self.screen.flush();
+    }
+    fn draw_screen(&mut self) {
         // draw contents to screen
-        let (width, height) = (self.size.0 as usize, self.size.1 as usize);
         for (i, line) in self
             .lines
             .iter()
             .skip(self.offset.1)
-            .take(height.saturating_sub(2))
+            .take(self.size.1.saturating_sub(2))
             .enumerate()
         {
             let temp = line.as_str();
             let slice = if temp.len() + NUMBERS_PADDING >= self.offset.0 {
-                let bound_x2 = width + self.offset.0;
+                let bound_x2 = self.offset.0 + self.size.0;
                 if temp.len() > bound_x2 {
                     temp.get(self.offset.0..bound_x2)
                 } else {
@@ -150,16 +175,17 @@ impl Editor {
                 None
             };
             // show relative numbers
-            let relative_number = (i as isize - self.cursor.1 as isize + 1).abs();
+            // TODO
+            let relative_number = (i as isize - self.cursor.1 as isize).abs();
             self.screen.write(format!(
                 "{}{}{:>4}{}{}",
-                Goto(1, i as u16 + 1),
+                Goto(1, 1 + i as u16),
                 color::Fg(color::LightBlack),
                 relative_number,
                 color::Fg(color::Reset),
                 termion::cursor::Right(1)
             ));
-            if i + 1 == self.cursor.1 as usize {
+            if self.cursor.1 == i {
                 self.screen.write(format!(
                     "{}{}",
                     color::Bg(color::Rgb(0x30, 0x30, 0x30)),
@@ -173,7 +199,8 @@ impl Editor {
                     .write(format!("{}{}", slice, color::Bg(color::Reset)));
             }
         }
-
+    }
+    fn render_status(&mut self) {
         // status bar
         let status_mode = {
             let mode = match self.mode {
@@ -218,7 +245,7 @@ impl Editor {
             )
         };
         self.status_bar = format!("{}{}{}", status_mode, status_file, status_position);
-        let status_bar_pos = height as u16 - 1;
+        let status_bar_pos = self.size.1 as u16 - 1;
         self.screen.write(format!(
             "{}{}{}{}",
             Goto(1, status_bar_pos),
@@ -226,18 +253,6 @@ impl Editor {
             clear::CurrentLine,
             self.status_bar
         ));
-
-        // move cursor to self.cursor
-        if self.mode == Mode::Command {
-            self.screen
-                .write(format!("{}:{}", Goto(1, height as u16), self.command));
-        } else {
-            self.screen.write(format!(
-                "{}",
-                Goto(self.cursor.0 + NUMBERS_PADDING as u16 + 1, self.cursor.1)
-            ))
-        }
-        self.screen.flush();
     }
     fn run(mut self) {
         // start
@@ -268,47 +283,38 @@ impl Editor {
     }
     fn handle_normal(&mut self, key: Key) {
         match key {
-            Key::Char('h') => self.cursor.move_left(&self.offset),
-            Key::Char('k') => self.cursor.move_up(&self.offset, self.get_line_len(-1)),
-            Key::Char('l') => self.cursor.move_right(&self.offset, self.get_line_len(0)),
-            Key::Char('d') => self.mode = Mode::Spatial('d'),
+            Key::Char('h') => self.cursor.decrease_x(1),
+            Key::Char('j') => self.cursor.increase_y(1),
+            Key::Char('k') => self.cursor.decrease_y(1),
+            Key::Char('l') => self.cursor.increase_x(1),
             Key::Char('i') => self.switch_mode(Mode::Insert),
-            Key::Char('G') => {
-                self.scroll_to(self.lines.len());
-            }
-            Key::Char('j') => {
-                self.cursor
-                    .move_down(&self.offset, self.lines.len(), self.get_line_len(1));
-            }
+            Key::Char('d') => self.mode = Mode::Spatial('d'),
+            Key::Char('G') => self.scroll_to(self.lines.len()),
             Key::Char('a') => {
                 self.switch_mode(Mode::Insert);
-                if self.get_line_len(0) > 0 {
-                    self.cursor.0 += 1;
-                }
+                self.cursor.increase_x(1);
             }
             Key::Char('x') => {
                 let len = self.get_line_len(0);
                 let current_line = self.current_line();
                 if len > 0 {
-                    if self.cursor.1 > 1 {
-                        self.lines[current_line].remove(self.cursor.0 as usize - 1);
-                        if self.cursor.0 as usize > len {
-                            self.cursor.move_left(&self.offset);
-                        }
+                    self.lines[current_line].remove(self.cursor.0);
+                    if self.cursor.0 + 2 > len {
+                        self.cursor.decrease_x(1);
                     }
                 }
             }
             Key::Char('A') => {
                 self.switch_mode(Mode::Insert);
                 let len = self.get_line_len(0);
-                if len > self.size.0 as usize {
-                    self.offset.0 = len - self.size.0 as usize;
-                    self.cursor.0 = self.size.0;
+                if len > self.size.0 {
+                    self.offset.0 = len - self.size.0 + 2;
+                    self.cursor.0 = self.size.0 - 2;
                 } else {
                     self.offset.0 = 0;
-                    self.cursor.0 = len as u16;
+                    self.cursor.0 = len;
                 }
-                self.cursor.0 += 1;
+                self.cursor.increase_x(1);
             }
             Key::Char('I') => {
                 self.switch_mode(Mode::Insert);
@@ -347,19 +353,19 @@ impl Editor {
             }
             Key::Char('$') => {
                 let len = self.get_line_len(0);
-                if len > self.size.0 as usize {
-                    self.offset.0 = len - self.size.0 as usize;
+                if len > self.size.0 {
+                    self.offset.0 = len - self.size.0;
                     self.cursor.0 = self.size.0;
                 } else {
                     self.offset.0 = 0;
-                    self.cursor.0 = len as u16;
+                    self.cursor.0 = len;
                 }
             }
             Key::Char(':') => self.mode = Mode::Command,
             Key::Ctrl('u') => {
-                let delta = self.size.1 as usize / 2;
+                let delta = self.size.1 / 2;
                 if self.offset.1 == 0 {
-                    self.cursor.1 = self.cursor.1.saturating_sub(delta as u16) + 1;
+                    self.cursor.decrease_y(delta);
                 }
                 self.offset.1 = self.offset.1.saturating_sub(delta);
             }
@@ -403,18 +409,13 @@ impl Editor {
                 self.cursor.0 = 1;
                 self.cursor.1 += 1;
             }
-            Key::Left => self.cursor.move_left(&self.offset),
-            Key::Down => {
-                self.cursor
-                    .move_down(&self.offset, self.lines.len(), self.get_line_len(1))
-            }
-            Key::Up => self.cursor.move_up(&self.offset, self.get_line_len(-1)),
-            Key::Right => self.cursor.move_right(&self.offset, self.get_line_len(0)),
+            Key::Left => self.cursor.decrease_x(1),
+            Key::Down => self.cursor.increase_y(1),
+            Key::Up => self.cursor.decrease_y(1),
+            Key::Right => self.cursor.increase_x(1),
             Key::Esc => {
-                if self.cursor.0 > 1 {
-                    self.cursor.0 -= 1;
-                }
                 self.switch_mode(Mode::Normal);
+                self.cursor.decrease_x(1);
             }
             Key::Backspace => {
                 let mut join = false;
@@ -423,33 +424,29 @@ impl Editor {
                 if self.cursor.0 <= 1 && self.cursor.1 > 1 {
                     join = true;
                 } else if len > 0 && self.cursor.0 > 1 {
-                    self.lines[current_line].remove(self.offset.0 + self.cursor.0 as usize - 2);
-                    self.cursor.move_left(&self.offset);
+                    self.lines[current_line].remove(self.offset.0 + self.cursor.0 - 1);
+                    self.cursor.decrease_x(1);
                 }
                 if join {
                     let joined_line = self.get_line(0).map(|s| s.to_string());
-                    let mut split_point = 1;
+                    let mut split_point = 0;
                     if let Some(line) = self.get_line_mut(-1) {
-                        split_point = line.len() as u16;
+                        split_point = line.len();
                         line.push_str(&joined_line.unwrap());
                     }
                     self.lines.remove(self.current_line());
-                    self.cursor.1 -= 1;
-                    self.cursor.0 = split_point + 1;
+                    self.cursor.decrease_y(1);
+                    self.cursor.0 = split_point;
                 }
             }
             Key::Char(c) => {
-                let len = self.get_line_len(0);
                 let current_line = self.current_line();
-                if len > 0 {
-                    self.lines[current_line].insert(self.offset.0 + self.cursor.0 as usize - 1, c);
+                if self.get_line_len(0) > 0 {
+                    self.lines[current_line].insert(self.cursor.0 + self.offset.0, c);
                 } else {
                     self.lines[current_line].push(c);
-                    if self.cursor.0 == 0 {
-                        self.cursor.0 += 1;
-                    }
                 }
-                self.cursor.0 += 1;
+                self.cursor.increase_x(1);
             }
             _ => (),
         }
@@ -499,7 +496,7 @@ impl Editor {
                 Key::Char('d') => {
                     self.lines.remove(self.current_line());
                     let current_line = self.current_line();
-                    let len = self.lines[current_line].len() as u16;
+                    let len = self.lines[current_line].len();
                     if len == 0 {
                         self.cursor.0 = 1;
                     } else if self.cursor.0 > len {
