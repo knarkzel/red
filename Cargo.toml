@@ -3,6 +3,9 @@ name = "red"
 version = "0.1.0"
 authors = ["Knarkzel <knarkzel@gmail.com>"]
 edition = "2021"
+license = "GPL v2"
+readme = "README.md"
+description = "vim-based editor in Rust"
 
 [dependencies]
 termion = "1.5.5"
