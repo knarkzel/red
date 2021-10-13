@@ -1,8 +1,8 @@
 [package]
 name = "red"
 version = "0.1.0"
-authors = ["Knarkzel <knarkzel@knarkzel.xyz>"]
-edition = "2018"
+authors = ["Knarkzel <knarkzel@gmail.com>"]
+edition = "2021"
 
 [dependencies]
 termion = "1.5.5"

@@ -1,16 +1,13 @@
-// mods
 pub mod marker;
 pub mod mode;
 pub mod screen;
 
+use mode::*;
 use std::{
     fs::{read_to_string, File},
     io::{self, prelude::*, stdin},
 };
-
 use termion::{clear, color, cursor::Goto, event::Key, input::TermRead, style, terminal_size};
-
-use mode::*;
 
 fn main() {
     Editor::new().load_file().run();
@@ -39,29 +36,34 @@ impl Editor {
             ..Self::default()
         }
     }
+
     fn load_file(mut self) -> Self {
         let file = std::env::args().skip(1).next();
         if let Some(file) = file {
-            self.file = file.clone();
-            self.lines = read_to_string(file)
+            self.lines = read_to_string(&file)
                 .expect("Failed to read file")
                 .lines()
                 .map(|s| s.to_string())
                 .collect::<Vec<_>>();
+            self.file = file;
         }
         self
     }
+
     fn current_line(&self) -> usize {
         self.cursor.1 + self.offset.1
     }
+
     fn get_line(&self, offset: isize) -> Option<&String> {
         self.lines
             .get((self.current_line() as isize + offset) as usize)
     }
+
     fn get_line_mut(&mut self, offset: isize) -> Option<&mut String> {
         let current_line = self.current_line() as isize;
         self.lines.get_mut((current_line + offset) as usize)
     }
+
     fn get_line_len(&self, offset: isize) -> usize {
         if let Some(line) = self.get_line(offset) {
             line.len()
@@ -69,6 +71,7 @@ impl Editor {
             0
         }
     }
+
     fn switch_mode(&mut self, mode: Mode) {
         self.mode = mode;
         match self.mode {
@@ -82,6 +85,7 @@ impl Editor {
             _ => (),
         }
     }
+
     fn save(&self) -> io::Result<()> {
         let mut file = File::create(&self.file)?;
         for line in self.lines.iter() {
@@ -90,6 +94,7 @@ impl Editor {
         }
         Ok(())
     }
+
     fn align_scroll(&mut self) {
         // check vertically VVV
         if self.cursor.1 > self.size.1.saturating_sub(3) {
@@ -107,19 +112,23 @@ impl Editor {
             self.offset.decrease_x(1);
         }
     }
+
     fn scroll_to(&mut self, line: usize) {
         self.offset.1 = line.saturating_sub(10);
         self.cursor.1 = line.saturating_sub(self.offset.1 + 1);
         self.cursor.0 = 0;
     }
+
     fn delete_end(&mut self) {
         let current_line = self.current_line();
         let _ = self.lines[current_line].split_off(self.cursor.0.saturating_sub(1) as usize);
     }
+
     fn reset_x(&mut self) {
         self.offset.0 = 0;
         self.cursor.0 = 0;
     }
+
     fn update(&mut self) {
         // size
         let term_size = terminal_size().unwrap();
@@ -154,6 +163,7 @@ impl Editor {
         }
         self.screen.flush();
     }
+
     fn draw_screen(&mut self) {
         // draw contents to screen
         for (i, line) in self
@@ -200,6 +210,7 @@ impl Editor {
             }
         }
     }
+
     fn render_status(&mut self) {
         // status bar
         let status_mode = {
@@ -254,6 +265,7 @@ impl Editor {
             self.status_bar
         ));
     }
+
     fn run(mut self) {
         // start
         self.update();
@@ -281,6 +293,7 @@ impl Editor {
             }
         }
     }
+
     fn handle_normal(&mut self, key: Key) {
         match key {
             Key::Char('h') => self.cursor.decrease_x(1),
@@ -381,6 +394,7 @@ impl Editor {
             _ => (),
         }
     }
+
     fn handle_insert(&mut self, key: Key) {
         match key {
             Key::Char('\t') => {
@@ -451,6 +465,7 @@ impl Editor {
             _ => (),
         }
     }
+
     fn handle_command(&mut self, key: Key) -> bool {
         // returns true when we want to exit application
         match key {
@@ -490,6 +505,7 @@ impl Editor {
         }
         false
     }
+
     fn handle_spatial(&mut self, letter: char, key: Key) {
         match letter {
             'd' => match key {
