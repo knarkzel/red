@@ -1,0 +1,10 @@
+html { margin-bottom: 300px; font-family:sans-serif; }
+body { background: #282828; color: white; }
+p, ul { font-size: 1.25em; }
+@media (min-width: 55em) { .fixed { display: inline-block; vertical-align: top ; } }
+.fixed { max-width: 275px ; }
+figure { float: right; padding: 0.5em; }
+figcaption { text-align: center; font-size: 1.5em; }
+blockquote { font-size: 1.5em; }
+a { color: #fe8019; }
+a:active { color: #b16286; }
